@@ -1,0 +1,76 @@
+{
+  "source_video_count": 6,
+  "segments": 60,
+  "source_duration_seconds": 1150.89,
+  "prepared_media_mib": 489.0,
+  "continuous_core_coverage": true,
+  "all_media_sha256_checked": true,
+  "all_segments_audio_and_video_present": true,
+  "sample_frame_visually_inspected": true,
+  "sample_audio_signal_verified": true,
+  "score_validation_and_weighted_summary_checks_passed": true,
+  "python_syntax_checked": true,
+  "shell_syntax_checked": true,
+  "lighthouse_model_loaded": true,
+  "lighthouse_inference_run": true,
+  "note": "User-provided logs confirm real Lighthouse model generation. Run 28047637 (run_003) failed strict schema validation because scores were flat numbers/null. Constrained decoding is locally tested but awaits a new remote GPU run; no scores are accepted as reviewed research results.",
+  "pyav_installation_fix": {
+    "version": "14.2.0",
+    "linux_python312_wheel": "av-14.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "wheel_sha256": "14c5f00b0b60d127ac0cde46a5bce9b67e905ba93033fdd48ae550c0c05d51b8",
+    "binary_only_enforced": true,
+    "remote_installation_verified": true
+  },
+  "venv_retry_fix": {
+    "existing_environment_with_readonly_Activate_ps1_reused": true,
+    "activation_script_unchanged": true,
+    "remote_retry_verified": true
+  },
+  "chat_message_fix": {
+    "pinned_transformers_version": "4.57.6",
+    "old_TypeError_reproduced": true,
+    "fixed_actual_messages_pass_upstream_format_guard": true,
+    "downstream_template_renderer_stubbed": true,
+    "remote_gpu_retry_verified": true,
+    "retry_output": "results/run_002"
+  },
+  "generation_format_fix": {
+    "local_regression_tests_passed": 10,
+    "eos_token_ids": [
+      151645,
+      151643
+    ],
+    "stop_on_complete_json": true,
+    "original_raw_answer_preserved": true,
+    "semantic_accuracy_automatically_certified": false,
+    "remote_retry_verified": false,
+    "next_output": "results/run_004",
+    "remote_job_id": "28047637",
+    "remote_output": "results/run_003",
+    "remote_observation": "Generated JSON but failed: Incomplete metric fields: valence. Output gave flat numbers/null instead of score/evidence/confidence objects."
+  },
+  "constrained_decoding_fix": {
+    "library": "lm-format-enforcer==0.11.3",
+    "all_14_metric_objects_required": true,
+    "chinese_initial_character_regression_fixed": true,
+    "local_parser_and_summary_tests_passed": 11,
+    "actual_pinned_qwen_tokenizer_cpu_preflight_passed": true,
+    "local_python": "3.12.12",
+    "remote_python_from_user_logs": "3.12.1",
+    "local_torch": "2.8.0",
+    "local_transformers": "4.57.6",
+    "local_pydantic": "1.10.24",
+    "local_transformers_generate_integration": {
+      "model": "tiny randomly initialized Qwen2 CPU fixture, not Qwen2.5-Omni weights",
+      "scripted_token_bias": "synthetic fixture only; never used in analyze.py",
+      "flat_score_token_masked": true,
+      "full_14_metric_json_round_trip": true,
+      "generated_tokens": 371,
+      "completion_stopper_included": true
+    },
+    "remote_preflight_command": ".venv/bin/python check_format.py",
+    "remote_gpu_retry_verified": false,
+    "next_output": "results/run_004",
+    "semantic_accuracy_automatically_certified": false
+  }
+}

@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+models/
+data/segments/
+results/
+remote_results/
+backups/
+*.log

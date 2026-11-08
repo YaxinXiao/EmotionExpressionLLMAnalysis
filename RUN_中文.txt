@@ -1,0 +1,131 @@
+六个新闻争论视频：Qwen 多模态情绪表达评分
+
+当前修复：首段任务28047637（run_003）已生成JSON，但把valence等指标直接写成数字或null，缺少每项的evidence和confidence，因此校验失败。
+新版analyze.py用lm-format-enforcer==0.11.3在生成时限制JSON结构；每项必须包含score、evidence、confidence。
+分数只允许整数1–5或null，保留原始回答；不补造缺失依据或把null改成1。完成格式不代表评分内容正确。
+保留显式结束token、完整JSON停止条件及时间戳复核标记。最大新生成token数为4096；如果仍被截断，会报错而不是补全答案。
+check_format.py仅加载分词器，在CPU检查中文证据、14项字段、分数范围、null和结束标记，不加载模型权重、不分析视频。
+所有新结果仍明确标为unreviewed_model_draft，需核对画面、声音、原话及评分锚点。
+
+先在Mac本地终端更新小文件（保留远程旧文件备份）：
+rsync -av --backup --suffix=.before_run004 "/Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion/analyze.py" "/Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion/check_format.py" "/Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion/requirements.txt" yaxinxyx@lighthouse.arc-ts.umich.edu:~/qwen_video/
+
+然后在Lighthouse登录终端：
+cd ~/qwen_video
+module load python/3.12.1
+.venv/bin/python -m pip install --no-cache-dir "lm-format-enforcer==0.11.3" && .venv/bin/python check_format.py && sbatch --time=00:30:00 run.sbatch --limit 1 --output results/run_004
+
+安装、CPU检查都通过才会提交GPU任务。无需重新上传视频或下载模型。
+本次结果在results/run_004/segments/V01_S001.json；检查原话、画面/声音依据和评分，而不只检查格式通过。
+下方历史run_001/run_002命令对应之前的步骤；当前修复后需使用run_004。
+首段结果检查通过后，完整运行命令为：sbatch run.sbatch --output results/run_004
+Validated segments仅表示JSON格式及字段检查通过，不代表评分的内容效度已经得到验证。
+
+目的与评分对象
+本工具评估片段中整体争论互动所呈现的情绪表达，不测量人物真实内心，也不预测观众的感受。
+不按人物身份、国家或口音预设评分。模型只看到中性编号的短片，原文件名保留在映射表中；节目本身的标识仍可能暴露来源。
+如果以后需要人物层面的结果，需另行做说话人/镜头对应与人工校验，不能把目前的整体互动分数当成人物分数。
+
+量表
+valence：1非常负面、2较负面、3中性/混合、4较正面、5非常正面。
+arousal：1非常低、2较低、3中等、4较高、5非常高。
+ashamed, feelings of closeness to others, elated, self-esteem, frustration, happy,
+calm, proud, guilty, angry, friendly feelings, unhappy：
+1无可观察表达、2轻微、3中等、4明显、5非常明显。
+缺乏可判断的材料时为NA。
+详细提示词在rubric.txt；模型评分需结合原片复核，尤其是讽刺、重叠发言和混合语言。
+
+准备内容
+模型：Qwen/Qwen2.5-Omni-7B，固定revision ae9e1690543ffd5c0221dc27f79834d0294cba00。
+同时输入短片的音轨和画面，只加载Thinker并输出文字；不加载语音生成部分。
+核心区间约20秒，前后最多2秒上下文；模型每秒约2帧，单帧像素限制384*28*28。
+抽帧适合筛选持续的情绪表达，可能遗漏短暂表情与动作；不用于微表情测量。
+短片宽度不超过960，H.264 CRF18，PCM音轨；不做响度归一化。模型会将音轨重采样至16kHz单声道。
+保留源文件和短片SHA256、固定模型版本、提示词、实际依赖版本、原始输出、时间戳和推理资源记录。
+
+1. 在Mac本地终端上传已准备的整个文件夹
+保持U-M VPN连接。此命令在Mac执行，不是在yaxinxyx@lh2200终端执行：
+
+rsync -av --progress "/Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion/" yaxinxyx@lighthouse.arc-ts.umich.edu:~/qwen_video/
+
+2. 在Lighthouse登录节点安装依赖和下载模型（只做一次）
+如果仍在lh2200的交互GPU会话，输入一次exit回登录节点；已在登录节点则不用exit。
+
+cd ~/qwen_video
+bash setup_lighthouse.sh
+
+安装在本项目.venv内。模型权重不会下载到Mac。下载可能较久，保持SSH窗口打开。
+不要在脚本报错后继续提交作业；保留报错以便排查。
+下载与安装需要网络；模型推理阶段为离线模式。
+
+PyAV安装修复（已上传旧版requirements.txt时）
+旧版固定的av==14.4.0在PyPI仅有源码包，会报缺少libavformat等开发库。
+修正版使用带CPython 3.12/Linux预编译包的av==14.2.0，并禁止源码编译PyAV。
+在Lighthouse登录节点的~/qwen_video执行：
+sed -i 's/^av==14\.4\.0$/av==14.2.0/' requirements.txt
+PIP_ONLY_BINARY=av bash setup_lighthouse.sh
+已成功安装且版本符合的依赖会复用。此操作无需重新上传视频。
+
+重复安装时Activate.ps1报Permission denied
+这是旧版脚本再次运行venv、尝试覆盖现有激活脚本时的错误。已有可用环境应直接复用。
+在Lighthouse登录节点的~/qwen_video执行以下修复，再继续安装：
+sed -i 's|^python3 -m venv \.venv$|if [ ! -x .venv/bin/python ]; then python3 -m venv .venv; fi|' setup_lighthouse.sh
+PIP_ONLY_BINARY=av bash setup_lighthouse.sh
+
+3. 先用第一段检查声画输入与JSON评分
+
+sbatch --time=00:30:00 run.sbatch --limit 1
+squeue -u yaxinxyx
+
+记下返回的作业号，用下面命令看日志（把JOBID替换为数字）：
+tail -n 40 qwen-emotion-JOBID.log
+
+成功日志包含Validated segments: 1/总片段数，且没有ERROR或Traceback。
+首段结果在results/run_001/segments/V01_S001.json。
+检查是否确实引用可见/可听证据，评分锚点是否符合研究意图；不要只看程序是否退出成功。
+
+4. 首段任务结束、结果检查通过后，运行完整六个视频
+
+sbatch run.sbatch
+
+默认申请1张A100、4CPU、64GB主机内存、最多4小时。这是任务时限，不是已测量的预计耗时。
+同配置已成功完成的段会跳过；到时限后可再次提交同一命令续跑。
+不要同时启动多个任务写同一结果目录。改提示词/模型/环境时须使用新的输出目录，例如：
+sbatch run.sbatch --output results/run_002
+旧任务已确认可以加载模型并执行GPU推理；当前版本仍需用首段任务验证生成格式和评分内容。
+
+首段任务28047574的消息格式修复
+该任务在apply_chat_template阶段失败：系统消息content必须是[{"type":"text","text":"..."}]，不能直接为字符串。
+analyze.py已修正。修改脚本会改变运行指纹，因此保留旧results/run_001中的失败记录，在新目录重试：
+sbatch --time=00:30:00 run.sbatch --limit 1 --output results/run_002
+首段成功并检查后，全量续跑必须使用同一新目录：
+sbatch run.sbatch --output results/run_002
+本次修复后的结果路径为results/run_002；以下通用说明里的run_001须相应替换为run_002。
+
+5. 结果与下载
+results/run_001/video_scores.csv：每个视频一行，14项时长加权均值及每项覆盖率。
+results/run_001/segment_scores.csv：每个核心时间区间的14项原始整数分数。
+results/run_001/score_evidence.csv：每项分数对应的依据及模型自述可信程度。
+results/run_001/segments/*.json：原始生成文本、三种模态证据、争论方式、局限、GPU资源记录。
+data/manifest.json：源视频到短片的映射与原视频绝对时间。证据中的相对秒数加clip_start_s即为原视频秒数。
+
+视频均值是五点有序编码的描述性汇总，允许小数；不能当作经验证的连续心理测量。
+NA不按0或1平均。coverage是该项有有效分数的核心区间时长占原片总时长的比例。
+status=partial表示尚未全部完成，不能当作完整视频结果。必须同时查看覆盖率、片段分布和证据。
+20秒相邻区间彼此相关；不能把短片数量当作独立视频或参与者数量。六个剪辑不支持总体文化差异推断。
+
+在Mac本地终端取回结果：
+rsync -av --progress yaxinxyx@lighthouse.arc-ts.umich.edu:~/qwen_video/results/ "/Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion/remote_results/"
+
+复现本地视频准备（只有需要重做时才运行；输出目录必须不存在）
+python3 -m venv /private/tmp/newsclip_media_env
+/private/tmp/newsclip_media_env/bin/python -m pip install imageio-ffmpeg==0.6.0
+/private/tmp/newsclip_media_env/bin/python prepare.py --source /Users/cheyenne/Desktop/NewsClip --output data_new
+
+技术依据
+https://huggingface.co/Qwen/Qwen2.5-Omni-7B
+https://github.com/QwenLM/Qwen2.5-Omni
+https://huggingface.co/docs/transformers/model_doc/qwen2_5_omni
+https://pytorch.org/get-started/previous-versions/
+https://documentation.its.umich.edu/arc-hpc/lighthouse/user-guide
+https://github.com/noamgat/lm-format-enforcer
