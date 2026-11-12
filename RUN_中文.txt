@@ -1,5 +1,85 @@
 六个新闻争论视频：Qwen 多模态情绪表达评分
 
+当前版本：run_007_nonverbal（非语义声音特征 + 可见行为，英文输出）
+
+任务28101648的结果恢复（无需重新提交GPU任务）：
+原任务完成59/60段，V04_S010的原始JSON含有孤立Unicode代理码，解析后写入UTF-8时报错。
+新版analyze.py将不可编码字符转义保存，并添加复核标记；不删除字符、不补写证据、不改分数或null。
+recover_results.py仅使用已经保存的raw_response，在新目录恢复记录并重新导出三张CSV；只需标准库Python。
+原目录不修改，59段成功记录和run_config.json逐字节保留；失败记录另存recovery_sources/，恢复步骤与来源哈希记录在recovery_config.json。
+恢复只解决文件保存问题，异常字符、未写完的句子和内容准确性仍需人工复核；结果仍为unreviewed_model_draft，Slurm历史FAILED状态不会改变。
+
+在Mac本地终端执行：
+cd /Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion
+mkdir -p remote_results
+rsync -av --progress 'yaxinxyx@lighthouse.arc-ts.umich.edu:/home/yaxinxyx/qwen_video/results/run_007_nonverbal_full_20261108_133501' remote_results/
+python3 recover_results.py --source remote_results/run_007_nonverbal_full_20261108_133501 --output remote_results/run_007_nonverbal_full_20261108_133501_recovered
+
+下载完整后再执行恢复命令。目标目录必须不存在；运行成功会显示Recovered without inference: V04_S010和Validated segments: 60。
+相关CPU测试：python3 -m unittest -v test_analysis test_recovery
+本次不改prompt、模型或解码约束。以下同步与sbatch指令用于今后新的推理运行；无需为恢复该任务重新推理。
+
+按本次要求直接重跑全部6个视频、60个片段，不加--limit 1。
+模式为nonverbal_prompt_only：保留原始音视频，提示词禁止使用词义、引语、字幕、屏幕文字、主题和人物身份作证据。
+这不是物理去语义：未遮挡字幕，也未用声学特征替代原始语音。运行配置与每段记录都会注明该模式。
+保留原14个字段，但本版评分对象统一为“感知到的外显情绪表现”，语气、表情、姿态和动作均可作为证据；不因排除了语言内容就自动填null。
+材料足以评估但未观察到表达时给1；有表达时按显著程度给2-5；只有遮挡、听不清、归属不明或无法区分等导致不能评估时才给null。不强制分数或空值分布。
+self_esteem在本版操作化为“表现出的自信/自我肯定”，guilty为“看起来歉意/懊悔的表现”；不是实际自尊、真实内疚或责任判断，也不是已经验证的替代量表。运行配置记录这两项定义，不能与旧版当作完全相同的构念直接比较。
+各维度提供可检查的语气、表情和动作线索，但单一动作不等同于某种情绪；仍保留证据不足时的null和模型自述confidence。不能保证空值减少或结果更准确。
+删除language_evidence字段，保留visual_evidence、audio_evidence、interaction_pattern、limitations。
+模型权重、媒体、抽帧、JSON解码方法和时长加权汇总方法不变；旧版本文件已保存在backups/before_nonverbal_*，旧结果不覆盖。
+
+在Mac本地终端同步（不是在Lighthouse窗口执行）：
+cd /Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion
+rsync -avc --backup --suffix=".before_run007_$(date +%Y%m%d_%H%M%S)" rubric.txt analyze.py run.sbatch check_format.py test_analysis.py run_007_files.sha256 yaxinxyx@lighthouse.arc-ts.umich.edu:/home/yaxinxyx/qwen_video/
+
+在Lighthouse终端执行；下面最后一整行仅在文件校验、CPU回归和分词器检查均通过后提交一次全量任务：
+cd ~/qwen_video
+module load python/3.12.1
+sha256sum -c run_007_files.sha256 && .venv/bin/python -m unittest -v test_analysis && .venv/bin/python check_format.py && sbatch run.sbatch --output "results/run_007_nonverbal_full_$(date +%Y%m%d_%H%M%S)"
+
+日志为qwen-nonverbal-en-JOBID.log，包含RESULTS目录和MODE说明。
+成功运行结束应显示Validated segments: 60/60; errors in this run: 0。review_flags仍表示待复核的输出，不是内容正确的保证。
+
+run_007分词器预检修复：lm-format-enforcer 0.11.3的字符串快速路径可能拒绝把文本、结束引号和逗号合在一起的token，即使相同字符可以分别生成。
+check_format.py现在检查同一JSON文本是否存在合法token路径：仅在复合token被拒绝时尝试无损拆分，每个替代token仍必须通过实际解码器的允许列表，完整解码文本必须逐字一致。
+分数范围、必填字段、Unicode及EOS检查均保留；不修改推理时的解码器，不放宽JSON约束，不改评分或prompt。校验失败时不会执行后面的sbatch。
+
+在Mac本地下载：
+mkdir -p remote_results
+rsync -av --progress 'yaxinxyx@lighthouse.arc-ts.umich.edu:/home/yaxinxyx/qwen_video/results/run_007_nonverbal_full_*' remote_results/
+
+以下为run_006及更早版本的历史说明，不要混用旧prompt校验值和输出目录。
+
+历史版本：run_006_english_output（英文提示词，英文输出）
+
+任务28097280成功完成首段格式检查，但输出为中文，因为旧rubric.txt仍写着Respond in Chinese。
+当前rubric.txt明确要求所有证据、互动描述和局限均用英文；非英语引语须译成英文，并标明来自翻译后的语音或字幕。
+每项evidence最多180字符，五个顶层说明字段各最多350字符，与现有JSON约束一致。
+旧结果保留原样；重新推理使用新的run_006_english_output目录，不翻译或覆盖旧模型原始输出。
+这次只先测试一个片段。格式成功不代表证据正确；复核英文输出、时间戳、null与1的区分、真实引语和limitations后再跑全量。
+
+在Mac本地终端同步本次修改（已有模型和视频继续复用）：
+cd /Users/cheyenne/Desktop/CC_LLM/Qwen_Video_Emotion
+rsync -av --backup --suffix=".before_run006_$(date +%Y%m%d_%H%M%S)" rubric.txt analyze.py yaxinxyx@lighthouse.arc-ts.umich.edu:~/qwen_video/
+
+在Lighthouse终端逐行执行，上一条成功后再执行下一条：
+cd ~/qwen_video
+module load python/3.12.1
+head -n 1 rubric.txt
+.venv/bin/python -m unittest -v test_analysis
+
+第一行必须包含Respond only in English，且测试通过。使用带时间戳的新目录提交一次首段任务：
+qwen_run_dir="results/run_006_english_output_$(date +%Y%m%d_%H%M%S)"
+printf 'Result directory: %s\n' "$qwen_run_dir"
+sbatch --time=00:30:00 run.sbatch --limit 1 --output "$qwen_run_dir"
+
+检查对应的qwen-emotion-en-JOBID.log及上述目录中的segments/V01_S001.json。
+首段内容复核通过后，在同一shell中运行sbatch run.sbatch --output "$qwen_run_dir"；若重新登录，先把qwen_run_dir设为实际首段结果目录。
+同配置的成功片段会跳过；不要重复提交首段任务。修改代码、prompt或依赖后应使用新的目录。
+
+以下为历史运行与故障处理记录，其中run_001至run_005以及中文输出要求均不代表当前运行配置。
+
 当前修复：首段任务28047637（run_003）已生成JSON，但把valence等指标直接写成数字或null，缺少每项的evidence和confidence，因此校验失败。
 新版analyze.py用lm-format-enforcer==0.11.3在生成时限制JSON结构；每项必须包含score、evidence、confidence。
 分数只允许整数1–5或null，保留原始回答；不补造缺失依据或把null改成1。完成格式不代表评分内容正确。

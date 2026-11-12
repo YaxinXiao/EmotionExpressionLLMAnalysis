@@ -15,10 +15,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 MODEL_ID = 'Qwen/Qwen2.5-Omni-7B'
 REVISION = 'ae9e1690543ffd5c0221dc27f79834d0294cba00'
+ANALYSIS_MODE = 'nonverbal_prompt_only'
+MEASUREMENT_TARGET = 'perceived_nonverbal_expression'
+METRIC_OPERATIONALIZATIONS = {
+    'self_esteem': 'Displayed self-assurance/self-affirmation; not actual self-worth or trait self-esteem.',
+    'guilty': 'Perceived apologetic/remorse-like display; not actual guilt, responsibility, or wrongdoing.',
+}
 METRICS = ['valence', 'arousal', 'ashamed', 'feelings_of_closeness_to_others', 'elated',
            'self_esteem', 'frustration', 'happy', 'calm', 'proud', 'guilty', 'angry',
            'friendly_feelings', 'unhappy']
-TEXT_KEYS = ['visual_evidence', 'audio_evidence', 'language_evidence', 'interaction_pattern', 'limitations']
+TEXT_KEYS = ['visual_evidence', 'audio_evidence', 'interaction_pattern', 'limitations']
 MAX_NEW_TOKENS = 4096
 EOS_TOKEN_IDS = [151645, 151643]  # <|im_end|>, <|endoftext|>, verified for the fixed revision.
 SYSTEM_TEXT = ('You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, '
@@ -66,9 +72,15 @@ def digest_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def utf8_safe_text(text):
+    """Escape unencodable surrogate code points without deleting or guessing text."""
+    return text.encode('utf-8', errors='backslashreplace').decode('utf-8')
+
+
 def write_json(path, value):
     temp = path.with_suffix(path.suffix + '.tmp')
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    text = json.dumps(value, ensure_ascii=False, indent=2)
+    temp.write_text(utf8_safe_text(text), encoding='utf-8')
     temp.replace(path)
 
 
@@ -137,7 +149,7 @@ def parse_response(raw):
         else:
             raise ValueError('Multiple JSON objects in one answer; cannot select a rating silently')
     if set(value) != {'scores', *TEXT_KEYS}:
-        raise ValueError('Response must include scores and all five evidence/limitations fields')
+        raise ValueError('Response must include scores and exactly these text fields: ' + ', '.join(TEXT_KEYS))
     if set(value.get('scores', {})) != set(METRICS):
         raise ValueError('Response must include exactly 14 metrics')
     for name in METRICS:
@@ -160,6 +172,13 @@ def parse_response(raw):
 def evidence_review_flags(value, core_a, core_b):
     """Flag missing review locations; this is not an automated truth/accuracy check."""
     flags = []
+    text_fields = {f'{metric}.evidence': value['scores'][metric]['evidence'] for metric in METRICS}
+    text_fields.update({key: value[key] for key in TEXT_KEYS})
+    for name, text in text_fields.items():
+        surrogates = sorted({ord(char) for char in text if 0xD800 <= ord(char) <= 0xDFFF})
+        if surrogates:
+            codes = ', '.join(f'U+{code:04X}' for code in surrogates)
+            flags.append(f'{name}: Unicode surrogate {codes}; preserved as escape, review original text')
     for metric in METRICS:
         item = value['scores'][metric]
         if item['score'] is None:
@@ -214,7 +233,8 @@ def export_tables(manifest, output):
         with (output / name).open('w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows({key: utf8_safe_text(value) if isinstance(value, str) else value
+                              for key, value in row.items()} for row in rows)
     save('segment_scores.csv', segment_rows, ['video_id', 'segment_id', 'core_start_s', 'core_end_s', 'review_status', 'review_flags'] + METRICS)
     save('score_evidence.csv', evidence_rows, ['video_id', 'segment_id', 'core_start_s', 'core_end_s', 'clip_start_s', 'metric', 'score', 'evidence', 'confidence'])
     save('video_scores.csv', summary, list(summary[0]) if summary else ['video_id'])
@@ -224,7 +244,7 @@ def export_tables(manifest, output):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--limit', type=int, help='Number of initial segments to process for a smoke test')
-    p.add_argument('--output', type=Path, default=ROOT / 'results' / 'run_005_english')
+    p.add_argument('--output', type=Path, default=ROOT / 'results' / 'run_007_nonverbal')
     p.add_argument('--export-only', action='store_true')
     args = p.parse_args()
     if args.limit is not None and args.limit < 1:
@@ -248,7 +268,12 @@ def main():
     rubric = (ROOT / 'rubric.txt').read_text(encoding='utf-8')
     from lmformatenforcer.integrations.transformers import build_token_enforcer_tokenizer_data
     versions = {k: importlib.metadata.version(k) for k in ['torch', 'torchvision', 'transformers', 'qwen-omni-utils', 'av', 'librosa', 'accelerate', 'lm-format-enforcer', 'pydantic']}
-    identity = {'model_id': MODEL_ID, 'revision': REVISION, 'manifest_sha256': digest_bytes(manifest_path.read_bytes()),
+    identity = {'model_id': MODEL_ID, 'revision': REVISION, 'analysis_mode': ANALYSIS_MODE,
+                'measurement_target': MEASUREMENT_TARGET,
+                'metric_operationalizations': METRIC_OPERATIONALIZATIONS,
+                'semantic_control': {'method': 'prompt_only', 'original_audio_supplied': True,
+                                     'on_screen_text_masked': False},
+                'manifest_sha256': digest_bytes(manifest_path.read_bytes()),
                 'rubric_sha256': digest_bytes(rubric.encode()), 'script_sha256': digest_bytes(Path(__file__).read_bytes()),
                 'versions': versions, 'dtype': 'bfloat16', 'attention': 'sdpa', 'fps': 2,
                 'max_pixels': 384 * 28 * 28,
@@ -263,6 +288,8 @@ def main():
     if config.exists() and json.loads(config.read_text()) != identity:
         raise RuntimeError('Existing output belongs to a different configuration. Choose a fresh --output directory.')
     write_json(config, identity)
+    print('RESULTS', args.output.resolve(), flush=True)
+    print('MODE', ANALYSIS_MODE, '(original audio/video retained; semantic exclusion is instructed)', flush=True)
     records_dir = args.output / 'segments'
     records_dir.mkdir(exist_ok=True)
     model_path = ROOT / 'models' / 'Qwen2.5-Omni-7B'
@@ -292,7 +319,9 @@ def main():
         question = (rubric + f'\nFor this segment, rate only the core interval from {core_a:.2f} to '
                     f'{core_b:.2f} seconds within the video. Use the remaining footage before and '
                     'after this interval only to understand context; do not score it again. '
-                    'Express evidence times in seconds within the current short clip.')
+                    'Express evidence times in seconds within the current short clip. '
+                    'Use only nonverbal vocal features and visible behavior; do not use word meaning '
+                    'or any on-screen text. Return the required JSON in English.')
         messages = [{'role': 'system', 'content': [{'type': 'text', 'text': SYSTEM_TEXT}]},
                     {'role': 'user', 'content': [{'type': 'video', 'video': str(media), 'fps': 2,
                                                  'max_pixels': 384 * 28 * 28}, {'type': 'text', 'text': question}]}]
@@ -344,7 +373,8 @@ def main():
                 review_flags.append('Text precedes the JSON object; review raw response')
             if parsing['trailing_text_chars']:
                 review_flags.append('Text remains after the JSON object; review raw response')
-            write_json(dest, {'status': 'ok', 'segment': segment, 'analysis': parsed, 'raw_response': raw,
+            write_json(dest, {'status': 'ok', 'analysis_mode': ANALYSIS_MODE,
+                       'segment': segment, 'analysis': parsed, 'raw_response': raw,
                        'review_status': 'unreviewed_model_draft', 'review_flags': review_flags,
                        'parsing': parsing, 'generation': diagnostics,
                        'elapsed_s': round(time.time() - started, 2), 'gpu': torch.cuda.get_device_name(),
@@ -354,7 +384,8 @@ def main():
                   f'stop={diagnostics["stop_reason"]}', f'review_flags={len(review_flags)}', flush=True)
         except Exception as exc:
             failures += 1
-            write_json(dest, {'status': 'error', 'segment': segment, 'raw_response': raw,
+            write_json(dest, {'status': 'error', 'analysis_mode': ANALYSIS_MODE,
+                             'segment': segment, 'raw_response': raw,
                              'error': repr(exc), 'generation': diagnostics,
                              'elapsed_s': round(time.time() - started, 2), 'job_id': os.environ['SLURM_JOB_ID']})
             print('ERROR', segment['segment_id'], repr(exc), flush=True)

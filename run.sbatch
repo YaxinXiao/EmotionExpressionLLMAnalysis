@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=qwen-emotion-en
+#SBATCH --job-name=qwen-nonverbal-en
 #SBATCH --account=alrodri
 #SBATCH --partition=alrodri-a100
 #SBATCH --nodes=1
@@ -8,7 +8,7 @@
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
-#SBATCH --output=qwen-emotion-en-%j.log
+#SBATCH --output=qwen-nonverbal-en-%j.log
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:?Submit from the Qwen_Video_Emotion directory}"
 module load python/3.12.1
